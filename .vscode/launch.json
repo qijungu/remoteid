@@ -1,0 +1,50 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/sitl/bin/arducopter",
+            "args": ["--model", "+",
+                "-S",
+                "-I0",
+                "--speedup", "1",
+                "--remoteid", "616263646566303132333435363738397778797A",
+                "--home", "30.270083225404864,-97.7730248064704,0,90",
+                "--defaults", "${workspaceFolder}/libraries/SITL/RemoteID/copter.parm"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/libraries",
+            "environment": [],
+            "MIMode": "gdb",
+            "preLaunchTask": "ardupilot build",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+
+        {
+            "name": "(gdb) Attach",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/build/sitl/bin/arducopter",
+            "processId": "${command:pickProcess}",
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}
