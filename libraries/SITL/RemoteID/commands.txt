@@ -1,0 +1,4 @@
+sim_vehicle.py -v ArduCopter --console --map --osd
+sim_vehicle.py -I1 -v ArduCopter --console --map
+sim_vehicle.py -I2 -v ArduCopter --console --map
+sim_vehicle.py -I1 -v ArduCopter --console --map & sim_vehicle.py -I2 -v ArduCopter --console --map

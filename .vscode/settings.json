@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "chrono": "cpp",
+        "functional": "cpp",
+        "thread": "cpp",
+        "fstream": "cpp"
+    },
+    "git.ignoreLimitWarning": true,
+}
