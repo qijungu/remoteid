@@ -9,7 +9,7 @@ struct AuthenticationMessageData {
     unsigned pageNumber : 4;
     unsigned pageReserved : 4;
     unsigned pageCount : 4;  // total page count, up to 5 pages
-    uint8_t length : 8;
+    uint8_t length;
     uint32_t timestamp;      // 32 bit Unix Timestamp in seconds since 00:00:00 01/01/2019 (to relate back to standard unix timestamp, add 1546300800 to base it on 00:00:00 01/01/1970)
     uint8_t authenticationData[17];
 } __attribute__((packed));
@@ -25,14 +25,26 @@ class AuthenticationMessage: public MessageBody {
             uint8_t pageCount,
             uint8_t length,
             uint32_t timestamp,
+            uint8_t pageDataLength,
             const uint8_t authenticationData[17]
         ) {
+            assert(sizeof(struct AuthenticationMessageData)==24);
+            memset(&authentication, 0, sizeof(struct AuthenticationMessageData));
             authentication.authType = authType;
             authentication.pageNumber = pageNumber;
             authentication.pageCount = pageCount;
             authentication.length = length;
             authentication.timestamp = timestamp;
-            memcpy(authentication.authenticationData, authenticationData, 17);
+            if (pageDataLength > 17) pageDataLength = 17;
+            memcpy(authentication.authenticationData, authenticationData, pageDataLength);
+            data_len = sizeof(struct AuthenticationMessageData);
+            data = (uint8_t*)&authentication;
+        }
+
+        AuthenticationMessage(uint8_t* d) {
+            assert(sizeof(struct AuthenticationMessageData)==24);
+            memset(&authentication, 0, sizeof(struct AuthenticationMessageData));
+            memcpy(&authentication, d, sizeof(struct AuthenticationMessageData));
             data_len = sizeof(struct AuthenticationMessageData);
             data = (uint8_t*)&authentication;
         }

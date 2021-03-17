@@ -15,7 +15,7 @@ struct LocationVectorMessageData {
     uint8_t speed;                       // If value <= 225*0.25, encodedValue = value/0.25, set multiplier flag to 0
                                          // Else if value > 225*0.25 and value <254.25, encodedValue = (value – (225*0.25))/0.75, set multiplier flag to 1
                                          // Else value >= 254.25 m/s, encodedValue = 254, set multiplier flag to 1
-    uint8_t verticalSpeed;               // EncodedValue = Value(m/s) / 0.5
+    int8_t verticalSpeed;                // EncodedValue = Value(m/s) / 0.5, up to ±63.5 m/s (12.5k ft/min)
     int32_t latitude;                    // EncodedValue = Value(UA) * 10^7
     int32_t longitude;                   // EncodedValue = Value(UA) * 10^7
     uint16_t pressureAltitude;           // EncodedValue = (Value(m) + 1000) / 0.5
@@ -24,10 +24,10 @@ struct LocationVectorMessageData {
     unsigned verticalAccuracy : 4;       // enum RID_Vertical_Accuracy
     unsigned horizontalAccuracy : 4;     // enum RID_Horizontal_Accuracy
     unsigned baroAltitudeAccuracy : 4;   // enum RID_Vertical_Accuracy
-    unsigned speedAccuracy : 4;          // RID_Speed_Accuracy
+    unsigned speedAccuracy : 4;          // enum RID_Speed_Accuracy
     uint16_t timestamp;                  // Time of applicability expressed in 1/10ths of seconds since the last hour
     unsigned reserved23 : 4;
-    unsigned timestampAccuracy : 4;      // Timestamp accuracy: Bits [3..0] (*0.1 s stepping resolutions
+    unsigned timestampAccuracy : 4;      // Timestamp accuracy: Bits [3..0], 0.1 s stepping resolutions, 0.1 s – 1.5 s, 0=unknown
     uint8_t reserved24;
 } __attribute__((packed));
 
@@ -42,7 +42,7 @@ class LocationVectorMessage: public MessageBody {
             uint8_t flag_speed_multiplier,  // enum RID_Speed_Multiplier
             uint8_t trackDirection,
             uint8_t speed,
-            uint8_t verticalSpeed,
+            int8_t verticalSpeed,
             int32_t latitude,
             int32_t longitude,
             uint16_t pressureAltitude,
@@ -55,6 +55,8 @@ class LocationVectorMessage: public MessageBody {
             uint16_t timestamp,
             uint8_t timestampAccuracy
         ) {
+            assert(sizeof(struct LocationVectorMessageData)==24);
+            memset(&locationVector, 0, sizeof(struct LocationVectorMessageData));
             locationVector.status = status;
             locationVector.flag_height_type = flag_height_type;
             locationVector.flag_ew_direction = flag_ew_direction;
@@ -76,6 +78,14 @@ class LocationVectorMessage: public MessageBody {
             data_len = sizeof(struct LocationVectorMessageData);
             data = (uint8_t*)&locationVector;
         };
+
+        LocationVectorMessage(uint8_t* d) {
+            assert(sizeof(struct LocationVectorMessageData)==24);
+            memset(&locationVector, 0, sizeof(struct LocationVectorMessageData));
+            memcpy(&locationVector, d, sizeof(struct LocationVectorMessageData));
+            data_len = sizeof(struct LocationVectorMessageData);
+            data = (uint8_t*)&locationVector;
+        }
 
         json toJson() override {
             json j;

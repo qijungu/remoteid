@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AP_GPS/AP_GPS.h>
+#include <AP_Baro/AP_Baro.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 
 #include "json.h"
@@ -49,12 +50,13 @@ public:
 
     SITL::MultiCopter* multicopter;
     AP_GPS *gps;
+    AP_Baro *baro;
     AP_SerialManager serial_manager;
     json log;
     std::ofstream logFile;
 
     RemoteIDManager(SITL::MultiCopter* _multicopter) :
-        multicopter(_multicopter), sock(true), broadcasting(false), seq(0)
+        multicopter(_multicopter), sock(true), broadcasting(false), seq(0), nextStaticUpdate(0), nextDynamicUpdate(0)
     {
         setup();
     }
@@ -70,38 +72,42 @@ protected:
 
     SocketAPM sock;
     bool broadcasting;  // status, if is broadcasting remoteid
+    bool auth;          // true, if key messages are authenticated
 
+    const uint64_t updateDynamicInterval = 1000000;
+    const uint64_t updateStaticInterval = 3000000;
     // const uint64_t LegacyBTStatic = 3000000;
-    const uint64_t updateRate = 1000000;
     // const uint64_t LegacyBTStatic = 1000000 * 10;
     // const uint64_t LegacyBTDynamic = 1000000 * 10;
     // const uint64_t BTExtended = 333333;
     // const uint64_t WiFiStatic = 3000000;
     // const uint64_t WiFiDynamic = 333333;
 
-    uint64_t nextUpdate = 0;
-    // uint64_t nextDynamicUpdate = 0;
+    uint64_t nextDynamicUpdate; // for dynamic remote id packet
+    uint64_t nextStaticUpdate;  // for static remote id packet
 
     bool initBroadcast();
     void broadcast(RID_Msg_Type rmt);
     // set remote id simulation message sim_header
-    void setRSimMsgHeader(Sim_Msg_Type type);
+    int setRSimMsgHeader(RSimMessage& msg, Sim_Msg_Type type);
     // set remote id simmulation message, including sim_header and sim_payload
     // sim_playload is the remote id packet, includeing header and body
-    void setRSimMsg(const MessageHeader& header, const MessageBody& body);
+    int setRSimMsg(RSimMessage& msg, const MessageHeader& header, const MessageBody& body);
     // process received broadcast message
     void recvBroadcast(uint8_t* rm, size_t n);
 
 private:
 
     RSimMessage msg_out;  // remote message out to the broadcast channel
+                          // include a simulation header and a remote id packet
+                          // the simulation header is for broadcast module
     size_t msg_out_len;
     uint64_t seq;
     
     // private signer's key
     ecpoint_fp Us;
 
-    uint8_t msg_in[BRBUFSIZE];    // receive message in from broadcast
+    uint8_t msg_in[BRBUFSIZE];    // receive message in from broadcast, only a remote id packet
 
     // private status variables, to update each time within update() to make simultaion a bit faster
     uint64_t current_time; // current time
@@ -117,5 +123,23 @@ private:
     void LOG(const std::string& m) {
         std::cout << m << std::endl;
     }
+
+    void processMessagePack(const uint8_t* data);
+
+    int makeBasicID(RSimMessage& msg);
+    int makeAuthBasicID(RSimMessage& msg);
+
+    int makeLocationVector(RSimMessage& msg);
+    int makeAuthLocationVector(RSimMessage& msg);
+
+    int makeAuth(RSimMessage& msg, RID_Auth_Type type, uint8_t data[][25], uint8_t count);
+
+    void encodeDirection(float value, uint8_t& flag_ew_direction, uint8_t& trackDirection);
+    void encodeSpeed(float value, uint8_t& flag_speed_multiplier, uint8_t& speed);
+    void encodeVerticalSpeed(float value, int8_t& verticalSpeed);
+    void encodePressureAltitude(float value, uint16_t& pressureAltitude);
+    void encodeVerticalAccuracy(float value, uint8_t& verticalAccuracy);
+    void encodeHorizontalAccuracy(float value, uint8_t& horizontalAccuracy);
+    void encodeSpeedAccuracy(float value, uint8_t& speedAccuracy);
 
 };

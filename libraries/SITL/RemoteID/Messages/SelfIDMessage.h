@@ -18,11 +18,21 @@ class SelfIDMessage: public MessageBody {
             uint8_t descriptionType,
             const char description[23]
         ) {
+            assert(sizeof(struct SelfIDMessageData)==24);
+            memset(&selfID, 0, sizeof(struct SelfIDMessageData));
             selfID.descriptionType = descriptionType;
             memcpy(selfID.description, description, 23);
             data_len = sizeof(struct SelfIDMessageData);
             data = (uint8_t*)&selfID;
         };
+
+        SelfIDMessage(uint8_t* d) {
+            assert(sizeof(struct SelfIDMessageData)==24);
+            memset(&selfID, 0, sizeof(struct SelfIDMessageData));
+            memcpy(&selfID, d, sizeof(struct SelfIDMessageData));
+            data_len = sizeof(struct SelfIDMessageData);
+            data = (uint8_t*)&selfID;
+        }
 
         json toJson() override {
             json j;

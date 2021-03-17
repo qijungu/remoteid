@@ -3,13 +3,13 @@
 
 // Remote ID message type
 enum RID_Msg_Type {
-    RID_Basic = 0,
-    RID_Location = 1,
-    RID_Auth = 2,
-    RID_SelfID = 3,
-    RID_System = 4, 
-    RID_OperatorID = 5,
-    RID_MsgPack = 0xF,   // check again?? TODO
+    RID_BasicID = 0,       // static, mandatory
+    RID_Location = 1,    // dynamic, mandatory
+    RID_Auth = 2,        // static, optional
+    RID_SelfID = 3,      // static, optional
+    RID_System = 4,      // static, optional
+    RID_OperatorID = 5,  // static, optional
+    RID_MsgPack = 0xF,   // static/dynamic, optioanl
 };
 
 enum RID_ID_Type {
@@ -29,7 +29,7 @@ enum RID_UA_Type {
     RID_UA_Type_Glider = 6,            // Glider
     RID_UA_Type_Kite = 7,              // Kite
     RID_UA_Type_FreeBalloon = 8,       // Free Balloon
-    RID_UA_Type_CaptiveBalloon = 9,   // Captive Balloon
+    RID_UA_Type_CaptiveBalloon = 9,    // Captive Balloon
     RID_UA_Type_Airship = 10,          // Airship (such as a blimp)
     RID_UA_Type_Parachute = 11,        // Free Fall/Parachute (unpowered)
     RID_UA_Type_Rocket = 12,           // Rocket
@@ -74,7 +74,7 @@ enum RID_Vertical_Accuracy {
 };
 
 enum RID_Speed_Accuracy {
-    RID_Speed_Accuracy_Unknown = 0,  // $10 m/s or Unknown
+    RID_Speed_Accuracy_Unknown = 0,  // >=10 m/s or Unknown
     RID_Speed_Accuracy_10m = 1,      // <10 m/s
     RID_Speed_Accuracy_3m = 2,       // <3 m/s
     RID_Speed_Accuracy_1m = 3,       // <1 m/s
@@ -94,7 +94,7 @@ enum RID_EW_Direction {
 
 enum RID_Speed_Multiplier {
     RID_Speed_Multiplier_1Q = 0, // *1/4
-    RID_Speed_Multiplier_3Q = 0, // *3/4
+    RID_Speed_Multiplier_3Q = 1, // *3/4
 };
 
 enum RID_Auth_Type {

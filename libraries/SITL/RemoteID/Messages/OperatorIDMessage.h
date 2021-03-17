@@ -5,8 +5,8 @@
 
 // 5.4.5.20 Operator ID Message Type: 0x5, Static Periodicity, Optional
 struct operatorIDMessageData {
-    unsigned operatorIdType : 8;
-    char operatorId[20];
+    uint8_t operatorIdType;
+    uint8_t operatorId[20];
     uint8_t reserved[3];
 } __attribute__((packed));
 
@@ -19,12 +19,21 @@ class OperatorIDMessage: public MessageBody {
             uint8_t operatorIdType,
             char operatorId[20]
         ) {
+            assert(sizeof(struct operatorIDMessageData)==24);
+            memset(&operatorID, 0, sizeof(struct operatorIDMessageData));
             operatorID.operatorIdType = operatorIdType;
             memcpy(operatorID.operatorId, operatorId, 20);
             data_len = sizeof(struct operatorIDMessageData);
             data = (uint8_t*)&operatorID;
         };
 
+        OperatorIDMessage(uint8_t* d) {
+            assert(sizeof(struct operatorIDMessageData)==24);
+            memset(&operatorID, 0, sizeof(struct operatorIDMessageData));
+            memcpy(&operatorID, d, sizeof(struct operatorIDMessageData));
+            data_len = sizeof(struct operatorIDMessageData);
+            data = (uint8_t*)&operatorID;
+        }
         json toJson() override {
             json j;
             j["OperatorID Type"] = std::to_string(operatorID.operatorIdType);

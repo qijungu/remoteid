@@ -5,7 +5,7 @@
 #include "BasicIDMessage.h"
 #include "LocationVectorMessage.h"
 #include "AuthenticationMessage.h"
-#include "AuthenticationMessagePages.h"
+#include "AuthenticationMessagePage.h"
 #include "SelfIDMessage.h"
 #include "SystemMessage.h"
 #include "OperatorIDMessage.h"

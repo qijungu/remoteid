@@ -18,6 +18,7 @@ class MessageHeader {
         const size_t data_len = sizeof(struct MessageHeaderData);
 
         MessageHeader(uint8_t messageType) {
+            assert(sizeof(struct MessageHeaderData)==1);
             header.MessageType = messageType & 0xF;
             header.ProtocolVersion = 0x0;
         }

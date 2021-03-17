@@ -30,6 +30,8 @@ class SystemMessage: public MessageBody {
             uint16_t areaCeiling,
             uint16_t areaFloor
         ) {
+            assert(sizeof(struct SystemMessageData)==24);
+            memset(&system, 0, sizeof(struct SystemMessageData));
             system.operatorLocationType = operatorLocationType;
             system.areaRadius = areaRadius;
             system.areaCount = areaCount;
@@ -41,6 +43,14 @@ class SystemMessage: public MessageBody {
             data_len = sizeof(struct SystemMessageData);
             data = (uint8_t*)&system;
         };
+
+        SystemMessage(uint8_t* d) {
+            assert(sizeof(struct SystemMessageData)==24);
+            memset(&system, 0, sizeof(struct SystemMessageData));
+            memcpy(&system, d, sizeof(struct SystemMessageData));
+            data_len = sizeof(struct SystemMessageData);
+            data = (uint8_t*)&system;
+        }
 
         json toJson() override {
             json j;

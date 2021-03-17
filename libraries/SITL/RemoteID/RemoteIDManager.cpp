@@ -15,36 +15,49 @@ void RemoteIDManager::setup() {
     logFile.open ("/var/log/remoteid/-" + std::to_string(std::time(nullptr) - 1546300800) + ".txt");
 
     gps = AP_GPS::get_singleton();
+    baro = AP_Baro::get_singleton();
     
     serial_manager.init();
     gps->init(serial_manager);
 
     sock.reuseaddress();
 
+    auth = true;
     authparams_setup();
     // extract private key
     // method1
     extract_key1(&Us, multicopter->get_remoteid(), RIDLEN);
     // method2
-    extract_key2(&Us, multicopter->get_remoteid(), RIDLEN);
+    //extract_key2(&Us, multicopter->get_remoteid(), RIDLEN);
 }
 
-void RemoteIDManager::setRSimMsgHeader(Sim_Msg_Type type) {
-    msg_out.header.type = type;
-    memcpy(msg_out.header.id, multicopter->get_remoteid(), 20);
-    msg_out.header.time = current_time;
-    msg_out.header.lat = current_real_location.lat;
-    msg_out.header.lng = current_real_location.lng;
-    msg_out.header.alt = current_real_location.alt;
-    msg_out_len = sizeof(RSimMessage_Header);
+/**
+ * This is for simulation only. It passes the true vehicle location and time to the broadcast module
+ * return the length of msg
+ */
+int RemoteIDManager::setRSimMsgHeader(RSimMessage& msg, Sim_Msg_Type type) {
+    msg.header.type = type;
+    memcpy(msg.header.id, multicopter->get_remoteid(), 20);
+    msg.header.time = current_time;
+    msg.header.lat = current_real_location.lat;
+    msg.header.lng = current_real_location.lng;
+    msg.header.alt = current_real_location.alt;
+    return sizeof(RSimMessage_Header);
 }
 
-void RemoteIDManager::setRSimMsg(const MessageHeader& header, const MessageBody& body) {
-    setRSimMsgHeader(RSim_Broadcast);
-    msg_out.header.seq = ++seq;  // only increase seq for broadcast
-    memcpy(msg_out.payload, header.data, header.data_len);
-    memcpy(msg_out.payload+header.data_len, body.data, body.data_len);
-    msg_out_len = sizeof(RSimMessage_Header) + header.data_len + body.data_len;
+/**
+ * msg header contains info for broadcast simulation only.
+ * msg paylaod contains header and body of remote id packet.
+ * return the length of msg
+ */
+int RemoteIDManager::setRSimMsg(RSimMessage& msg, const MessageHeader& header, const MessageBody& body) {
+    // set header of msg_out
+    int hl = setRSimMsgHeader(msg, RSim_Broadcast);
+    msg.header.seq = ++seq;  // only increase seq for broadcast
+    // set payload of msg_out
+    memcpy(msg.payload, header.data, header.data_len);
+    memcpy(msg.payload+header.data_len, body.data, body.data_len);
+    return hl + header.data_len + body.data_len;
 }
 
 // should only called from update()
@@ -52,12 +65,13 @@ bool RemoteIDManager::initBroadcast() {
     // already broading, no need to re-init
     if (broadcasting) return true;
 
-    setRSimMsgHeader(RSim_Update);
+    msg_out_len = setRSimMsgHeader(msg_out, RSim_Update);
     sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
     printf("init %lu\n", current_time);
 
     broadcasting = true;
-    nextUpdate = current_time + 1000000;
+    nextStaticUpdate = current_time;
+    nextDynamicUpdate = current_time;
 
     return true;
 }
@@ -73,7 +87,7 @@ void RemoteIDManager::update() {
 
     if (broadcasting) {
         // update the channel of the position
-        setRSimMsgHeader(RSim_Update);
+        msg_out_len = setRSimMsgHeader(msg_out, RSim_Update);
         sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
         //printf("updt %lu\n", current_time);
 
@@ -103,23 +117,19 @@ void RemoteIDManager::update() {
          * BCMinStaticRefreshRate 3 Seconds BUR0020 5.4.4
          */
         // then, broadcast remote id on a schedule
-        if (current_time >= nextUpdate ) {
-
-            broadcast(RID_Basic);
+        if (current_time >= nextStaticUpdate) {
+            broadcast(RID_BasicID);
             printf("brct basic %lu\n", current_time);
-            /*const Location& l = multicopter->get_location();
-            printf("loc lat %d, lng %d, alt %d\n", l.lat, l.lng, l.alt);
-            const Location& gl = gps->location();
-            printf("gps lat %d, lng %d, alt %d\n", gl.lat, gl.lng, gl.alt);
-            const Vector3f& p = multicopter->get_position();
-            printf("pos x %f, y %f, z %f\n", p.x, p.y, p.z);
-            const Vector3f& v = multicopter->get_velocity_ef();
-            printf("vel x %f, y %f, z %f\n", v.x, v.y, v.z);
-            const Vector3f& gv = gps->velocity();
-            printf("gve x %f, y %f, z %f\n", gv.x, gv.y, gv.z);*/
 
-            nextUpdate += updateRate;
+            nextStaticUpdate += updateStaticInterval;
         }
+
+        if (current_time >= nextDynamicUpdate) {
+            broadcast(RID_Location);
+
+            nextDynamicUpdate += updateDynamicInterval;
+        }
+
     }
 
     return;
@@ -128,21 +138,16 @@ void RemoteIDManager::update() {
 
 void RemoteIDManager::recvBroadcast(uint8_t* m, size_t n) {
     MessageHeader h(m);
-    //const uint8_t* b = m + h.data_len;
-    // verify
-    int v;
-    fp_t sig;
-    // method 1
-    v = verify1(sig, multicopter->get_remoteid(), RIDLEN, (byte*)m, n);
-    // method 2
-    v = verify1(sig, multicopter->get_remoteid(), RIDLEN, m, n);
-    if (v) return;
+    const uint8_t* d = m + h.data_len;
     switch (h.header.MessageType) {
-        case RID_Basic :
-        LOG("recv,basic," + std::to_string(current_time));
+        case RID_BasicID :
+        LOG("recv,basicid," + std::to_string(current_time));
+        // processBasicID(m);  // TODO
         break;
 
         case RID_Location :
+        LOG("recv,location," + std::to_string(current_time));
+        // processLocationVector(m); // TODO
         break;
 
         case RID_Auth :
@@ -157,6 +162,11 @@ void RemoteIDManager::recvBroadcast(uint8_t* m, size_t n) {
         case RID_OperatorID :
         break;
 
+        case RID_MsgPack :
+        LOG("recv,msgpack," + std::to_string(current_time));
+        processMessagePack(d);
+        break;
+
         default:
         ;
     }
@@ -167,107 +177,28 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
     bool ready = true;
 
     switch (rmt) {
-        case RID_Basic : {
-            uint8_t idType = 3;
-            uint8_t uaType = 2;
-            MessageHeader basicMessageHeader(RID_Basic);
-            BasicIDMessage basicIdMessage(idType, uaType, multicopter->get_remoteid());
-            setRSimMsg(basicMessageHeader, basicIdMessage);
+        case RID_BasicID : {
+            if (auth) msg_out_len = makeAuthBasicID(msg_out);
+            else msg_out_len = makeBasicID(msg_out);
             break;
         }
 
         case RID_Location : {
-            uint8_t status = 0;
-            uint8_t flag_height_type = RID_Height_Type_AGL;
-            uint8_t flag_ew_direction = RID_EW_Direction_East;
-            uint8_t flag_speed_multiplier = RID_Speed_Multiplier_1Q;
-            uint8_t trackDirection = (uint8_t)gps->ground_course();
-            uint8_t speed = (uint8_t)gps->ground_speed();
-            uint8_t verticalSpeed = 0; // calculate from velocity_ef
-            int32_t latitude = gps->location().lat;
-            int32_t longitude = gps->location().lng;
-            uint16_t pressureAltitude = 584;
-            uint16_t geodeticAltitude = 584;
-            uint16_t height = 0;
-            uint8_t verticalAccuracy = 0;
-            uint8_t horizontalAccuracy = 0;
-            uint8_t baroAltitudeAccuracy = 0;
-            uint8_t speedAccuracy = 0;
-            uint16_t locationVectorTimestamp = 0;
-            uint8_t timestampAccuracy = 0;
-            MessageHeader locationVectorMessageHeader(RID_Location);
-            LocationVectorMessage locationVectorMessage(
-                status,
-                flag_height_type,
-                flag_ew_direction,
-                flag_speed_multiplier,
-                trackDirection,
-                speed,
-                verticalSpeed,
-                latitude,
-                longitude,
-                pressureAltitude,
-                geodeticAltitude,
-                height,
-                verticalAccuracy,
-                horizontalAccuracy,
-                baroAltitudeAccuracy,
-                speedAccuracy,
-                locationVectorTimestamp,
-                timestampAccuracy
-            );
-            setRSimMsg(locationVectorMessageHeader, locationVectorMessage);
+            if (auth) msg_out_len = makeAuthLocationVector(msg_out);
+            else msg_out_len = makeLocationVector(msg_out);
             break;
         }
 
-        case RID_Auth : {
-            uint8_t authType = 0;
-            uint8_t pageNumber = 0;
-            uint8_t pageCount = 1;
-            uint8_t length = 17;
-            time_t timestamp = std::time(nullptr) - 1546300800;
-            uint32_t authenticationTimestamp = static_cast<uint32_t> (timestamp);
-            // sign
-            fp_t sig;
-            // method 1
-            sign1(sig, msg_out.payload, 10);
-            // method 2
-            sign2(sig, msg_out.payload, 10);
-            uint8_t authenticationData[17] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17};
-            memcpy(authenticationData, sig, 17);
-            MessageHeader authenticationMessageHeader(RID_Auth);
-            AuthenticationMessage authenticationMessage(
-                authType, 
-                pageNumber,
-                pageCount,
-                length,
-                authenticationTimestamp,
-                authenticationData
-            );
-            setRSimMsg(authenticationMessageHeader, authenticationMessage);
-            break;
-        }
-
-        /*case RID_AuthPages: {
-            uint8_t authPagesType = 0;
-            uint8_t pagesNumber = 1;
-            uint8_t authenticationPagesData[23] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
-            MessageHeader authenticationMessagePagesHeader(RID_AuthPages);
-            AuthenticationMessagePages authenticationMessagePages(authPagesType, pagesNumber, authenticationPagesData);
-            setRSimMsg(authenticationMessagePagesHeader, authenticationMessagePages);
-            break;
-        }*/
-
-        case RID_SelfID : {
+        /*case RID_SelfID : {
             uint8_t descriptionType = 0;
             char description[23] = "DronesRus:Survey";
             MessageHeader selfIDMessageHeader(RID_SelfID);
             SelfIDMessage selfIDMessage(descriptionType, description);
             setRSimMsg(selfIDMessageHeader, selfIDMessage);
             break;
-        }
+        }*/
 
-        case RID_System : {
+        /*case RID_System : {
             uint8_t systemFlags = 0;
             int32_t operatorLatitude = multicopter->get_home().lat;
             int32_t operatorLongitude = multicopter->get_home().lng;
@@ -287,16 +218,16 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
             );
             setRSimMsg(systemMessageHeader, systemMessage);
             break;
-        }
+        }*/
 
-        case RID_OperatorID : {
+        /*case RID_OperatorID : {
             uint8_t operatorIdType = 0;
             char operatorId[20] = "Damen Hannah #123";
             MessageHeader operatorIDMessageHeader(RID_OperatorID);
             OperatorIDMessage operatorIDMessage(operatorIdType, operatorId);
             setRSimMsg(operatorIDMessageHeader, operatorIDMessage);
             break;
-        }
+        }*/
         
         default :
             ready = false;
@@ -306,7 +237,296 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
     if (!ready) return;
 
     sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
-    
+
     //logFile << messagePack->toJson().dump(4) << std::endl;
     
+}
+
+void RemoteIDManager::processMessagePack(const uint8_t* data) {
+    MessagePack p(data);
+
+    int i;
+
+    // auth must be the first packet in message pack.
+    MessageHeader f(p.pack.messages[0]);
+
+    if (f.header.MessageType == RID_Auth) {
+        // process authentication
+        // get the signature
+        fp_t sig;
+        uint8_t* sigptr = (uint8_t*)&sig;
+        // page 0
+        MessageHeader h_a0(p.pack.messages[0]);
+        AuthenticationMessage a0(p.pack.messages[0]+1);
+        // validate page 0
+        assert(a0.authentication.authType == RID_Auth_Type_UasID || a0.authentication.authType == RID_Auth_Type_Message);
+        assert(a0.authentication.pageCount == 2);
+        assert(a0.authentication.pageNumber == 0);
+        assert(a0.authentication.length == 32);
+        // page 1
+        MessageHeader h_a1(p.pack.messages[1]);
+        AuthenticationMessagePage a1(p.pack.messages[1]+1);
+        // validate page 1
+        assert(a1.authenticationPage.authType == a0.authentication.authType);
+        assert(a1.authenticationPage.pageNumber == 1);
+
+        // TODO: a0.authentication.timestamp
+
+        // copy the signature from page 0 and page 1
+        memcpy(sigptr, a0.authentication.authenticationData, 17);
+        memcpy(sigptr+17, a1.authenticationPage.authenticationData, 15);
+
+        // get id from message[2]
+        BasicIDMessage m(p.pack.messages[2]+1);
+        uint8_t rid[RIDLEN];
+        memcpy(rid, m.basicIDMessage.uasId, RIDLEN);
+
+        // from message[2], all data, but need to be concatenated
+
+        uint8_t* d = p.pack.messages[2];
+        uint8_t l = (p.pack.numberMessages - 2) * 25;
+        
+        // verify
+        //int v;
+        // method 1
+        verify1(sig, rid, RIDLEN, d, l);
+        // method 2
+        //v = verify2(sig, rid, RIDLEN, d, l);
+
+    } else {
+        // not auth messages
+        for (i=0; i<p.pack.numberMessages; i++) {
+            MessageHeader h(p.pack.messages[i]);
+            if (h.header.MessageType == RID_BasicID) {
+                BasicIDMessage m(p.pack.messages[i]+1);
+                // processBasicID(m);  // TODO
+            } else if (h.header.MessageType == RID_Location) {
+                LocationVectorMessage m(p.pack.messages[i]+1);
+                // processLocationVector(m); // TODO
+            }
+        }
+    }
+
+    return;
+}
+
+
+int RemoteIDManager::makeBasicID(RSimMessage& msg) {
+    uint8_t idType = RID_ID_Type_Serial;
+    uint8_t uaType = RID_UA_Type_Helicopter;
+    MessageHeader basicMessageHeader(RID_BasicID);
+    BasicIDMessage basicIdMessage(idType, uaType, multicopter->get_remoteid());
+    return setRSimMsg(msg, basicMessageHeader, basicIdMessage);
+}
+
+int RemoteIDManager::makeLocationVector(RSimMessage& msg) {
+    uint8_t status = RID_OP_Status_Airborne;
+    uint8_t flag_height_type = RID_Height_Type_AGL;
+    uint8_t flag_ew_direction;
+    uint8_t trackDirection;
+    encodeDirection(gps->ground_course(), flag_ew_direction, trackDirection);
+    uint8_t flag_speed_multiplier = RID_Speed_Multiplier_1Q;
+    uint8_t speed;
+    encodeSpeed(gps->ground_speed(), flag_speed_multiplier, speed);
+    int8_t verticalSpeed;
+    encodeVerticalSpeed(gps->velocity().z, verticalSpeed);
+    int32_t latitude = gps->location().lat;
+    int32_t longitude = gps->location().lng;
+    uint16_t pressureAltitude;
+    encodePressureAltitude(baro->get_altitude(), pressureAltitude);
+    uint16_t geodeticAltitude;
+    encodePressureAltitude(gps->location().alt/100, geodeticAltitude);
+    uint16_t height = geodeticAltitude;
+    uint8_t verticalAccuracy;
+    float accuracy;
+    if (gps->vertical_accuracy(accuracy)) encodeVerticalAccuracy(accuracy, verticalAccuracy);
+    else verticalAccuracy = RID_Vertical_Accuracy_Unknown;
+    uint8_t horizontalAccuracy;
+    if (gps->horizontal_accuracy(accuracy)) encodeHorizontalAccuracy(accuracy, horizontalAccuracy);
+    else horizontalAccuracy = RID_Horizontal_Accuracy_Unknown;
+    uint8_t baroAltitudeAccuracy = RID_Vertical_Accuracy_3m;
+    uint8_t speedAccuracy;
+    if (gps->speed_accuracy(accuracy)) ;
+    else speedAccuracy = RID_Speed_Accuracy_Unknown;
+    uint16_t timestamp = (current_time/100000)%36000; // current_time in us, timestamp in 0.1s
+    uint8_t timestampAccuracy = 1;
+    MessageHeader locationVectorMessageHeader(RID_Location);
+    LocationVectorMessage locationVectorMessage(
+        status,
+        flag_height_type,
+        flag_ew_direction,
+        flag_speed_multiplier,
+        trackDirection,
+        speed,
+        verticalSpeed,
+        latitude,
+        longitude,
+        pressureAltitude,
+        geodeticAltitude,
+        height,
+        verticalAccuracy,
+        horizontalAccuracy,
+        baroAltitudeAccuracy,
+        speedAccuracy,
+        timestamp,
+        timestampAccuracy
+    );
+    return setRSimMsg(msg, locationVectorMessageHeader, locationVectorMessage);
+}
+
+int RemoteIDManager::makeAuthBasicID(RSimMessage& msg) {
+    uint8_t data[1][25];
+    RSimMessage _m;
+    makeBasicID(_m);
+    memcpy(data[0], _m.payload, 25);
+    return makeAuth(msg, RID_Auth_Type_UasID, data, 1);
+}
+
+int RemoteIDManager::makeAuthLocationVector(RSimMessage& msg) {
+    uint8_t data[2][25];
+    RSimMessage _m;
+    makeBasicID(_m);
+    memcpy(data[0], _m.payload, 25);
+    makeLocationVector(_m);
+    memcpy(data[1], _m.payload, 25);
+    return makeAuth(msg, RID_Auth_Type_Message, data, 2);
+} 
+
+/**
+ * Auth packet is carried in MessagePack.
+ * The first two messages are auth page 0 and page 1, including the signature.
+ * The rest of messages are the data.
+ */
+int RemoteIDManager::makeAuth(RSimMessage& msg, RID_Auth_Type type, uint8_t data[][25], uint8_t count) {
+    MessageHeader authPackHeader(RID_MsgPack);
+    MessagePack authPack;
+
+    // sign
+    fp_t sig;
+    // method 1
+    sign1(sig, (uint8_t*)&(data[0]), 25*count);
+    // method 2
+    //sign2(sig, m.payload, 25);
+
+    // auth page 0
+    uint8_t authType = type;
+    uint8_t pageNumber = 0;
+    uint8_t pageCount = 2;
+    uint8_t length = 32;
+    uint32_t timestamp = current_time;  // TODO, to fix according to spec
+    uint8_t* signature = (uint8_t*)sig;
+    MessageHeader authenticationMessageHeader(RID_Auth);
+    AuthenticationMessage authenticationMessage(
+        authType, 
+        pageNumber,
+        pageCount,
+        length,
+        timestamp,
+        17,
+        signature
+    );
+    RSimMessage _m;
+    setRSimMsg(_m, authenticationMessageHeader, authenticationMessage);
+    authPack.addMessage(_m.payload);
+
+    // auth page 1
+    pageNumber = 1;
+    AuthenticationMessagePage authenticationMessagePage(
+        authType, 
+        pageNumber,
+        sizeof(fp_t)-17,
+        signature+17
+    );
+    setRSimMsg(_m, authenticationMessageHeader, authenticationMessagePage);
+    authPack.addMessage(_m.payload);
+
+    // add data
+    for (int i=0; i<count; i++) authPack.addMessage(data[i]);
+
+    return setRSimMsg(msg, authPackHeader, authPack);
+}
+
+// Direction expressed as the route course measured clockwise from true north. Encode as 0–179.
+// If E/W Direction bit is set, then 180 should be added to the value.
+void RemoteIDManager::encodeDirection(float value, uint8_t& flag_ew_direction, uint8_t& trackDirection) {
+    int16_t direction = (int16_t)round(value);
+    direction = direction % 360;
+    if (0 <= direction && direction < 180) {
+        flag_ew_direction = RID_EW_Direction_East;
+        trackDirection = direction;
+    } else {
+        flag_ew_direction = RID_EW_Direction_West;
+        trackDirection = direction-180;
+    }
+}
+
+// If value <= 225*0.25, encodedValue = value/0.25, set multiplier flag to 0
+// Else if value > 225*0.25 and value <254.25, encodedValue = (value – (225*0.25))/0.75, set multiplier flag to 1
+// Else value >= 254.25 m/s, encodedValue = 254, set multiplier flag to 1
+void RemoteIDManager::encodeSpeed(float value, uint8_t& flag_speed_multiplier, uint8_t& speed) {
+    if (value < 0) value = 0;
+    if (value <= 225*0.25) {
+        flag_speed_multiplier = RID_Speed_Multiplier_1Q;
+        speed = (uint8_t)value*4;
+    } else if (value < 254.25) {
+        flag_speed_multiplier = RID_Speed_Multiplier_3Q;
+        speed = (uint8_t)((value - 225*0.25) / 0.75);
+    } else {
+        flag_speed_multiplier = RID_Speed_Multiplier_3Q;
+        speed = 254;
+    }
+}
+
+// EncodedValue = Value(m/s) / 0.5, up to ±63.5 m/s (12.5k ft/min)
+void RemoteIDManager::encodeVerticalSpeed(float value, int8_t& verticalSpeed) {
+    if (value > 63.5) value = 63.5;
+    if (value < -63.5) value = -63.5;
+    verticalSpeed = (int8_t)(value * 2);
+}             
+
+// EncodedValue = (Value(m) + 1000) / 0.5
+void RemoteIDManager::encodePressureAltitude(float value, uint16_t& pressureAltitude) {
+    if (value<-1000) value = -1000;
+    if (value>31767.5) value = 31767.5;
+    pressureAltitude = (uint16_t)((value + 1000) * 2);
+}
+
+// enum RID_Vertical_Accuracy
+void RemoteIDManager::encodeVerticalAccuracy(float value, uint8_t& verticalAccuracy) {
+    if (value < 0) verticalAccuracy = RID_Vertical_Accuracy_Unknown;
+    else if (value < 1) verticalAccuracy = RID_Vertical_Accuracy_1m;
+    else if (value < 3) verticalAccuracy = RID_Vertical_Accuracy_3m;
+    else if (value < 10) verticalAccuracy = RID_Vertical_Accuracy_10m;
+    else if (value < 25) verticalAccuracy = RID_Vertical_Accuracy_25m;
+    else if (value < 45) verticalAccuracy = RID_Vertical_Accuracy_45m;
+    else if (value < 150) verticalAccuracy = RID_Vertical_Accuracy_150m;
+    else verticalAccuracy = RID_Vertical_Accuracy_Unknown;
+}
+
+// enum RID_Horizontal_Accuracy
+void RemoteIDManager::encodeHorizontalAccuracy(float value, uint8_t& horizontalAccuracy) {
+    if (value < 0) horizontalAccuracy = RID_Horizontal_Accuracy_Unknown;
+    else if (value < 1) horizontalAccuracy = RID_Horizontal_Accuracy_1m;
+    else if (value < 3) horizontalAccuracy = RID_Horizontal_Accuracy_3m;
+    else if (value < 10) horizontalAccuracy = RID_Horizontal_Accuracy_10m;
+    else if (value < 30) horizontalAccuracy = RID_Horizontal_Accuracy_30m;
+    else if (value < 92.6) horizontalAccuracy = RID_Horizontal_Accuracy_005NM;
+    else if (value < 185.2) horizontalAccuracy = RID_Horizontal_Accuracy_01NM;
+    else if (value < 555.6) horizontalAccuracy = RID_Horizontal_Accuracy_03NM;
+    else if (value < 926) horizontalAccuracy = RID_Horizontal_Accuracy_05NM;
+    else if (value < 1852) horizontalAccuracy = RID_Horizontal_Accuracy_1NM;
+    else if (value < 3704) horizontalAccuracy = RID_Horizontal_Accuracy_2NM;
+    else if (value < 7408) horizontalAccuracy = RID_Horizontal_Accuracy_4NM;
+    else if (value < 18520) horizontalAccuracy = RID_Horizontal_Accuracy_10NM;
+    else horizontalAccuracy = RID_Horizontal_Accuracy_Unknown;
+}
+
+// enum RID_Speed_Accuracy
+void RemoteIDManager::encodeSpeedAccuracy(float value, uint8_t& speedAccuracy) {
+    if (value < 0) speedAccuracy = RID_Speed_Accuracy_Unknown;
+    else if (value < 0.3) speedAccuracy = RID_Speed_Accuracy_03m;
+    else if (value < 1) speedAccuracy = RID_Speed_Accuracy_1m;
+    else if (value < 3) speedAccuracy = RID_Speed_Accuracy_3m;
+    else if (value < 10) speedAccuracy = RID_Speed_Accuracy_10m;
+    else speedAccuracy = RID_Speed_Accuracy_Unknown;
 }
