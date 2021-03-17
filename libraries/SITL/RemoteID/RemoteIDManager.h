@@ -15,6 +15,7 @@ using json = nlohmann::json;
 #include "../SIM_Multicopter.h"
 #include "Messages/Messages.h"
 #include "generic/types.h"
+#include "Messages/Enums.h"
 
 namespace SITL { class MultiCopter; }
 
@@ -26,17 +27,6 @@ namespace SITL { class MultiCopter; }
 enum Sim_Msg_Type {
     RSim_Update = 1,       // add or update the vehicle's real location, no payload
     RSim_Broadcast = 2,    // remote id broadcast, the payload is remote id broadcast
-};
-
-// Remote ID message type
-enum RID_Msg_Type {
-    RID_Basic = 0,
-    RID_Location = 1,
-    RID_Auth = 2,
-    RID_AuthPages = 7,   // check again?? TODO
-    RID_SelfID = 3,
-    RID_System = 4, 
-    RID_OperatorID = 5,
 };
 
 typedef struct _message_header {

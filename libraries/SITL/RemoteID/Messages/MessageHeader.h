@@ -13,7 +13,7 @@ struct MessageHeaderData {
 
 class MessageHeader {
     public:
-        struct MessageHeaderData header;
+        struct MessageHeaderData header;   // 1 byte header
         const uint8_t* data = (uint8_t*)&header;
         const size_t data_len = sizeof(struct MessageHeaderData);
 

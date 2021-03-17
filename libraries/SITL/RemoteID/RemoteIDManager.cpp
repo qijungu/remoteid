@@ -6,6 +6,7 @@
 
 #include "RemoteIDManager.h"
 #include "Messages/Messages.h"
+#include "Messages/Enums.h"
 #include "auth/keysys.h"
 #include "auth/signer.h"
 #include "auth/verifier.h"
@@ -84,6 +85,23 @@ void RemoteIDManager::update() {
             printf("recv %lu : %s\n", current_time, msg_in);
         }
         
+        /**
+         * A Standard Remote ID Drone, remote ID capability is built into the drone, must broadcas:
+         * A unique identifier for the drone: drone's serial number or a session ID
+         * An indication of the drone's latitude, longitude, geometric altitude, and velocity;
+         * An indication of the control station's latitude, longitude, and geometric altitude;
+         * A time mark
+         * An emergency status indication.
+         * 
+         * A drone with a remote ID broadcast module, remote ID capability through module attached to drone, must broadcast
+         * The serial number of the broadcast module;
+         * An indication of the drone's latitude, longitude, geometric altitude, and velocity;
+         * An indication of the latitude, longitude, and geometric altitude of the drone's take-off location;
+         * A time mark.
+         * 
+         * BCMinUasLocRefreshRate 1 Seconds BUR0010 5.4.4
+         * BCMinStaticRefreshRate 3 Seconds BUR0020 5.4.4
+         */
         // then, broadcast remote id on a schedule
         if (current_time >= nextUpdate ) {
 
@@ -99,7 +117,6 @@ void RemoteIDManager::update() {
             printf("vel x %f, y %f, z %f\n", v.x, v.y, v.z);
             const Vector3f& gv = gps->velocity();
             printf("gve x %f, y %f, z %f\n", gv.x, gv.y, gv.z);*/
-
 
             nextUpdate += updateRate;
         }
@@ -129,9 +146,6 @@ void RemoteIDManager::recvBroadcast(uint8_t* m, size_t n) {
         break;
 
         case RID_Auth :
-        break;
-
-        case RID_AuthPages :
         break;
 
         case RID_SelfID :
@@ -164,7 +178,9 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
 
         case RID_Location : {
             uint8_t status = 0;
-            uint8_t locationVectorFlags = 0;
+            uint8_t flag_height_type = RID_Height_Type_AGL;
+            uint8_t flag_ew_direction = RID_EW_Direction_East;
+            uint8_t flag_speed_multiplier = RID_Speed_Multiplier_1Q;
             uint8_t trackDirection = (uint8_t)gps->ground_course();
             uint8_t speed = (uint8_t)gps->ground_speed();
             uint8_t verticalSpeed = 0; // calculate from velocity_ef
@@ -182,7 +198,9 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
             MessageHeader locationVectorMessageHeader(RID_Location);
             LocationVectorMessage locationVectorMessage(
                 status,
-                locationVectorFlags,
+                flag_height_type,
+                flag_ew_direction,
+                flag_speed_multiplier,
                 trackDirection,
                 speed,
                 verticalSpeed,
@@ -230,7 +248,7 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
             break;
         }
 
-        case RID_AuthPages: {
+        /*case RID_AuthPages: {
             uint8_t authPagesType = 0;
             uint8_t pagesNumber = 1;
             uint8_t authenticationPagesData[23] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
@@ -238,7 +256,7 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
             AuthenticationMessagePages authenticationMessagePages(authPagesType, pagesNumber, authenticationPagesData);
             setRSimMsg(authenticationMessagePagesHeader, authenticationMessagePages);
             break;
-        }
+        }*/
 
         case RID_SelfID : {
             uint8_t descriptionType = 0;

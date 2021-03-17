@@ -3,15 +3,16 @@
 
 #include <stdint.h>
 
-struct selfIDMessageData {
-    unsigned descriptionType : 8;
-    char description[23];
+// 5.4.5.16 Self ID Message Type: 0x3, Static Periodicity, Optional
+struct SelfIDMessageData {
+    uint8_t descriptionType;  // 0: text description
+    uint8_t description[23];
 } __attribute__((packed));
 
 class SelfIDMessage: public MessageBody {
     public:
 
-        struct selfIDMessageData selfID;
+        struct SelfIDMessageData selfID;
 
         SelfIDMessage(
             uint8_t descriptionType,
@@ -19,7 +20,7 @@ class SelfIDMessage: public MessageBody {
         ) {
             selfID.descriptionType = descriptionType;
             memcpy(selfID.description, description, 23);
-            data_len = sizeof(struct selfIDMessageData);
+            data_len = sizeof(struct SelfIDMessageData);
             data = (uint8_t*)&selfID;
         };
 

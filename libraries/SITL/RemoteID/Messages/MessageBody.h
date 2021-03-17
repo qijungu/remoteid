@@ -7,7 +7,7 @@ using json = nlohmann::json;
 class MessageBody {
     public:
 
-        uint8_t* data;
+        uint8_t* data;     // up to 24 bytes
         size_t data_len;
 
         MessageBody() : data(NULL), data_len(0) {}

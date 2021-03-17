@@ -3,8 +3,9 @@
 
 #include <stdint.h>
 
-struct authenticationMessagePagesData {
-    unsigned authType : 4;
+// 5.4.5.9 Authentication Message Type: 0x2, Static Periodicity, Optional
+struct AuthenticationMessagePagesData {
+    unsigned authType : 4;  // enum RID_Auth_Type
     unsigned pageNumber : 4;
     uint8_t authenticationData[23];
 } __attribute__((packed));
@@ -12,7 +13,7 @@ struct authenticationMessagePagesData {
 class AuthenticationMessagePages: public MessageBody {
     public:
 
-        struct authenticationMessagePagesData authenticationPages;
+        struct AuthenticationMessagePagesData authenticationPages;
 
         AuthenticationMessagePages(
             uint8_t authType,
@@ -22,7 +23,7 @@ class AuthenticationMessagePages: public MessageBody {
             authenticationPages.authType = authType;
             authenticationPages.pageNumber = pageNumber;
             memcpy(authenticationPages.authenticationData, authenticationData, 23);
-            data_len = sizeof(struct authenticationMessagePagesData);
+            data_len = sizeof(struct AuthenticationMessagePagesData);
             data = (uint8_t*)&authenticationPages;
         };
 

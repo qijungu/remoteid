@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+// 5.4.5.20 Operator ID Message Type: 0x5, Static Periodicity, Optional
 struct operatorIDMessageData {
     unsigned operatorIdType : 8;
     char operatorId[20];

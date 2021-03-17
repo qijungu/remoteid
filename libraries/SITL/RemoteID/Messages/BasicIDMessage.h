@@ -3,17 +3,18 @@
 
 #include <stdint.h>
 
-struct basicMessageData {
-    unsigned idType : 4;
-    unsigned uaType : 4;
-    char uasId[RIDLEN];
-    uint8_t reserve[3];
+// 5.4.5.5 Basic ID Message Type: 0x0, Static Periodicity, Mandatory
+struct BasicMessageData {
+    unsigned idType : 4;  // enum RID_ID_Type
+    unsigned uaType : 4;  // enum RID_UA_Type
+    char uasId[RIDLEN];   // 20 bytes
+    uint8_t reserve[3];   // reserved
 } __attribute__((packed));
 
 class BasicIDMessage: public MessageBody {
     public:
 
-        struct basicMessageData basicIDMessage;
+        struct BasicMessageData basicIDMessage;
 
         BasicIDMessage(
            uint8_t idType,
@@ -25,7 +26,7 @@ class BasicIDMessage: public MessageBody {
             memcpy(basicIDMessage.uasId, uasId, RIDLEN);
             uint8_t reserve[3] = {0,0,0};
             memcpy(basicIDMessage.reserve, reserve, 3);
-            data_len = sizeof(struct basicMessageData);
+            data_len = sizeof(struct BasicMessageData);
             data = (uint8_t*)&basicIDMessage;
         };
 
