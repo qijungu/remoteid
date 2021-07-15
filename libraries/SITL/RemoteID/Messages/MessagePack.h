@@ -31,7 +31,7 @@ class MessagePack: public MessageBody {
             memcpy(&pack, d, 2+count*25);
         }
 
-        void addMessage(uint8_t msg[25]){
+        void addMessage(const uint8_t msg[25]){
             if (pack.numberMessages >= 10) return; 
             memcpy(pack.messages[pack.numberMessages], msg, 25);
             pack.numberMessages++;

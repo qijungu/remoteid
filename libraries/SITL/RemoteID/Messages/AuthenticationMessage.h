@@ -5,10 +5,10 @@
 
 // 5.4.5.9 Authentication Message Type: 0x2, Static Periodicity, Optional
 struct AuthenticationMessageData {
-    unsigned authType : 4;   // enum RID_Auth_Type
     unsigned pageNumber : 4;
-    unsigned pageReserved : 4;
+    unsigned authType : 4;   // enum RID_Auth_Type
     unsigned pageCount : 4;  // total page count, up to 5 pages
+    unsigned pageReserved : 4;
     uint8_t length;
     uint32_t timestamp;      // 32 bit Unix Timestamp in seconds since 00:00:00 01/01/2019 (to relate back to standard unix timestamp, add 1546300800 to base it on 00:00:00 01/01/1970)
     uint8_t authenticationData[17];
@@ -41,7 +41,7 @@ class AuthenticationMessage: public MessageBody {
             data = (uint8_t*)&authentication;
         }
 
-        AuthenticationMessage(uint8_t* d) {
+        AuthenticationMessage(const uint8_t* d) {
             assert(sizeof(struct AuthenticationMessageData)==24);
             memset(&authentication, 0, sizeof(struct AuthenticationMessageData));
             memcpy(&authentication, d, sizeof(struct AuthenticationMessageData));

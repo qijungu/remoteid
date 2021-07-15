@@ -5,11 +5,11 @@
 
 // 5.4.5.7 Location/Vector Message Type: 0x1, Dynamic Periodicity, Mandatory
 struct LocationVectorMessageData {
-    unsigned status : 4;                 // enum RID_OP_Status
-    unsigned flag_reserved : 1;
-    unsigned flag_height_type : 1;       // enum RID_Height_Type
-    unsigned flag_ew_direction : 1;      // enum RID_EW_Direction
     unsigned flag_speed_multiplier : 1;  // enum RID_Speed_Multiplier
+    unsigned flag_ew_direction : 1;      // enum RID_EW_Direction
+    unsigned flag_height_type : 1;       // enum RID_Height_Type
+    unsigned flag_reserved : 1;
+    unsigned status : 4;                 // enum RID_OP_Status
     uint8_t trackDirection;              // Direction expressed as the route course measured clockwise from true north. Encode as 0–179.
                                          // If E/W Direction bit is set, then 180 should be added to the value.
     uint8_t speed;                       // If value <= 225*0.25, encodedValue = value/0.25, set multiplier flag to 0
@@ -21,13 +21,13 @@ struct LocationVectorMessageData {
     uint16_t pressureAltitude;           // EncodedValue = (Value(m) + 1000) / 0.5
     uint16_t geodeticAltitude;           // EncodedValue = (Value(m) + 1000) / 0.5, WGS-84 HAE
     uint16_t height;                     // EncodedValue = (Value(m) + 1000) / 0.5, above takeoff or ground to flag height type
-    unsigned verticalAccuracy : 4;       // enum RID_Vertical_Accuracy
     unsigned horizontalAccuracy : 4;     // enum RID_Horizontal_Accuracy
-    unsigned baroAltitudeAccuracy : 4;   // enum RID_Vertical_Accuracy
+    unsigned verticalAccuracy : 4;       // enum RID_Vertical_Accuracy
     unsigned speedAccuracy : 4;          // enum RID_Speed_Accuracy
+    unsigned baroAltitudeAccuracy : 4;   // enum RID_Vertical_Accuracy
     uint16_t timestamp;                  // Time of applicability expressed in 1/10ths of seconds since the last hour
-    unsigned reserved23 : 4;
     unsigned timestampAccuracy : 4;      // Timestamp accuracy: Bits [3..0], 0.1 s stepping resolutions, 0.1 s – 1.5 s, 0=unknown
+    unsigned reserved23 : 4;
     uint8_t reserved24;
 } __attribute__((packed));
 
@@ -79,7 +79,7 @@ class LocationVectorMessage: public MessageBody {
             data = (uint8_t*)&locationVector;
         };
 
-        LocationVectorMessage(uint8_t* d) {
+        LocationVectorMessage(const uint8_t* d) {
             assert(sizeof(struct LocationVectorMessageData)==24);
             memset(&locationVector, 0, sizeof(struct LocationVectorMessageData));
             memcpy(&locationVector, d, sizeof(struct LocationVectorMessageData));

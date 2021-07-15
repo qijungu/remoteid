@@ -61,7 +61,15 @@
         "streambuf": "cpp",
         "cfenv": "cpp",
         "typeinfo": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "csignal": "cpp",
+        "strstream": "cpp",
+        "bitset": "cpp",
+        "codecvt": "cpp",
+        "regex": "cpp",
+        "future": "cpp",
+        "typeindex": "cpp",
+        "*.ipp": "cpp"
     },
     "git.ignoreLimitWarning": true,
 }

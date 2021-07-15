@@ -13,10 +13,13 @@ using json = nlohmann::json;
 #include <chrono>
 #include <AP_HAL/utility/Socket.h>
 
+#include <map>
+
 #include "../SIM_Multicopter.h"
 #include "Messages/Messages.h"
 #include "generic/types.h"
 #include "Messages/Enums.h"
+#include "UAVStatus.h"
 
 namespace SITL { class MultiCopter; }
 
@@ -56,7 +59,7 @@ public:
     std::ofstream logFile;
 
     RemoteIDManager(SITL::MultiCopter* _multicopter) :
-        multicopter(_multicopter), sock(true), broadcasting(false), seq(0), nextStaticUpdate(0), nextDynamicUpdate(0)
+        multicopter(_multicopter), sock(true), broadcasting(false), seq(0), armed(false), mode(0), nextStaticUpdate(0), nextDynamicUpdate(0)
     {
         setup();
     }
@@ -103,9 +106,8 @@ private:
                           // the simulation header is for broadcast module
     size_t msg_out_len;
     uint64_t seq;
-    
-    // private signer's key
-    ecpoint_fp Us;
+    bool armed;
+    uint8_t mode;
 
     uint8_t msg_in[BRBUFSIZE];    // receive message in from broadcast, only a remote id packet
 
@@ -113,26 +115,24 @@ private:
     uint64_t current_time; // current time
     Location current_real_location; // current location
 
-    //void genSignature(uint8_t msg, int len);
+    // nearby uavs
+    std::map<std::array<uint8_t,RIDLEN>, UAVStatus> uavs;
+
     //bool verifySignature();
 
-    void LOG(char* m) {
-        printf("%s\n", m);
-    }
-
-    void LOG(const std::string& m) {
-        std::cout << m << std::endl;
-    }
-
     void processMessagePack(const uint8_t* data);
+    void processBasicID(const uint8_t* data, std::array<uint8_t, RIDLEN> id, bool verified);
+    void processLocationVector(const uint8_t* data, std::array<uint8_t, RIDLEN> id, bool verified);
+
+    void purgeStatus(std::array<uint8_t, RIDLEN> id);
 
     int makeBasicID(RSimMessage& msg);
     int makeAuthBasicID(RSimMessage& msg);
 
     int makeLocationVector(RSimMessage& msg);
     int makeAuthLocationVector(RSimMessage& msg);
-
-    int makeAuth(RSimMessage& msg, RID_Auth_Type type, uint8_t data[][25], uint8_t count);
+    void addSignature(MessagePack& authPack, RID_Auth_Type authType, uint8_t* data, int len);
+    bool verifySignature(const MessagePack& p);
 
     void encodeDirection(float value, uint8_t& flag_ew_direction, uint8_t& trackDirection);
     void encodeSpeed(float value, uint8_t& flag_speed_multiplier, uint8_t& speed);
@@ -142,4 +142,16 @@ private:
     void encodeHorizontalAccuracy(float value, uint8_t& horizontalAccuracy);
     void encodeSpeedAccuracy(float value, uint8_t& speedAccuracy);
 
+    void LOG(const char* m) {
+        LOG(std::string(m));
+    }
+
+    void LOG(const std::string& m) {
+        std::cout << "@"+std::to_string(current_time) << " : " << m << std::endl;
+    }
+
+    void end() {
+        LOG("end");
+        exit(0);
+    }
 };

@@ -5,8 +5,8 @@
 
 // 5.4.5.9 Authentication Message Type: 0x2, Static Periodicity, Optional
 struct AuthenticationMessagePageData {
-    unsigned authType : 4;  // enum RID_Auth_Type
     unsigned pageNumber : 4;
+    unsigned authType : 4;  // enum RID_Auth_Type
     uint8_t authenticationData[23];
 } __attribute__((packed));
 
@@ -31,7 +31,7 @@ class AuthenticationMessagePage: public MessageBody {
             data = (uint8_t*)&authenticationPage;
         };
 
-        AuthenticationMessagePage(uint8_t* d) {
+        AuthenticationMessagePage(const uint8_t* d) {
             assert(sizeof(struct AuthenticationMessagePageData)==24);
             memset(&authenticationPage, 0, sizeof(struct AuthenticationMessagePageData));
             memcpy(&authenticationPage, d, sizeof(struct AuthenticationMessagePageData));

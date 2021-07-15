@@ -5,8 +5,8 @@
 
 // 5.4.5.18 System Message Type: 0x4, Static Periodicity, Optional
 struct SystemMessageData {
-    unsigned flags : 6;
     unsigned operatorLocationType: 2; // enum RID_OP_Location_Type
+    unsigned flags : 6;
     int32_t operatorLatitude;   // Int signed deg*10^7 (LE)
     int32_t operatorLongitude;  // Int signed deg*10^7 (11 mm precision) (LE)
     uint16_t areaCount;  // Number of aircraft in Area, group or formation (default 1)

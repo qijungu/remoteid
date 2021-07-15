@@ -16,7 +16,7 @@
  * @param  msg, the message to verify in bytes
  * @param  len_msg, the length of message in bytes
  */
-int verify1(fp_t sig, byte* id, int len_id, byte* msg, int len_msg) {
+int verify1(fp_t sig, const byte* id, int len_id, const byte* msg, int len_msg) {
 
     ecpoint_fp s;
     int v = ecfp_get_point(&s, sig);

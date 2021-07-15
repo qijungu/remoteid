@@ -1,15 +1,21 @@
 #include <stdio.h>
 #include <iostream>
 #include <math.h>
-#include <chrono>
 #include <string>
+#include <algorithm>
+
+#include <AP_Arming/AP_Arming.h>
+#include <AP_Vehicle/AP_Vehicle.h>
 
 #include "RemoteIDManager.h"
 #include "Messages/Messages.h"
 #include "Messages/Enums.h"
+#include "Messages/AuthIDMessage.h"
+#include "Messages/AuthLocMessage.h"
 #include "auth/keysys.h"
 #include "auth/signer.h"
 #include "auth/verifier.h"
+#include "matrix.h"
 
 void RemoteIDManager::setup() {
     logFile.open ("/var/log/remoteid/-" + std::to_string(std::time(nullptr) - 1546300800) + ".txt");
@@ -24,11 +30,6 @@ void RemoteIDManager::setup() {
 
     auth = true;
     authparams_setup();
-    // extract private key
-    // method1
-    extract_key1(&Us, multicopter->get_remoteid(), RIDLEN);
-    // method2
-    //extract_key2(&Us, multicopter->get_remoteid(), RIDLEN);
 }
 
 /**
@@ -62,16 +63,27 @@ int RemoteIDManager::setRSimMsg(RSimMessage& msg, const MessageHeader& header, c
 
 // should only called from update()
 bool RemoteIDManager::initBroadcast() {
-    // already broading, no need to re-init
+    // already broadcasting, no need to re-init
     if (broadcasting) return true;
+
+    /*AP_GPS::GPS_Status gs = gps->status();
+    if ( !(gs==AP_GPS::GPS_OK_FIX_3D_RTK_FIXED || gs==AP_GPS::GPS_OK_FIX_3D_RTK_FLOAT || gs==AP_GPS::GPS_OK_FIX_3D_DGPS || gs==AP_GPS::GPS_OK_FIX_3D) )
+        return false;
+    LOG("gps ready, start broadcasting");*/
 
     msg_out_len = setRSimMsgHeader(msg_out, RSim_Update);
     sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
-    printf("init %lu\n", current_time);
+    LOG("init");
 
     broadcasting = true;
     nextStaticUpdate = current_time;
     nextDynamicUpdate = current_time;
+
+    // extract private key
+    // method1
+    extract_key1(&Us, multicopter->get_remoteid(), RIDLEN);
+    // method2
+    //extract_key2(&Us, multicopter->get_remoteid(), RIDLEN);
 
     return true;
 }
@@ -81,7 +93,29 @@ void RemoteIDManager::update() {
     current_time = multicopter->get_time_now_us();
     current_real_location = multicopter->get_location();
 
-    if (!broadcasting) initBroadcast();
+    if (AP::arming().is_armed()) {
+        if (!armed) {
+            armed = true;
+            LOG("armed");
+        }
+        if (!broadcasting) initBroadcast();
+    } else {
+        if (armed) {
+            armed = false;
+            LOG("disarmed");
+            end();
+        }
+        broadcasting = false;
+    }
+
+    uint8_t newmode = AP::vehicle()->get_mode();
+    if (mode != newmode) {
+        mode = newmode;
+        LOG("mode " + std::to_string(mode));
+    }
+
+    // quit on RTL, at the end of mission
+    if (mode == 6) end(); // refer to ArduCopter/mode.h
 
     gps->update();
 
@@ -89,14 +123,12 @@ void RemoteIDManager::update() {
         // update the channel of the position
         msg_out_len = setRSimMsgHeader(msg_out, RSim_Update);
         sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
-        //printf("updt %lu\n", current_time);
 
         // first process all received messages
         ssize_t n;
         while ( (n = sock.recv(msg_in, BRBUFSIZE-1, 1)) >= 0) {
             msg_in[n] = '\0';
             recvBroadcast(msg_in, n);
-            printf("recv %lu : %s\n", current_time, msg_in);
         }
         
         /**
@@ -119,7 +151,6 @@ void RemoteIDManager::update() {
         // then, broadcast remote id on a schedule
         if (current_time >= nextStaticUpdate) {
             broadcast(RID_BasicID);
-            printf("brct basic %lu\n", current_time);
 
             nextStaticUpdate += updateStaticInterval;
         }
@@ -141,13 +172,13 @@ void RemoteIDManager::recvBroadcast(uint8_t* m, size_t n) {
     const uint8_t* d = m + h.data_len;
     switch (h.header.MessageType) {
         case RID_BasicID :
-        LOG("recv,basicid," + std::to_string(current_time));
-        // processBasicID(m);  // TODO
+        //LOG("recv basicid");
+        //processBasicID(d);  // TODO
         break;
 
         case RID_Location :
-        LOG("recv,location," + std::to_string(current_time));
-        // processLocationVector(m); // TODO
+        //LOG("recv location");
+        //processLocationVector(d); // TODO
         break;
 
         case RID_Auth :
@@ -163,7 +194,7 @@ void RemoteIDManager::recvBroadcast(uint8_t* m, size_t n) {
         break;
 
         case RID_MsgPack :
-        LOG("recv,msgpack," + std::to_string(current_time));
+        LOG("recv msgpack " + std::to_string(n));
         processMessagePack(d);
         break;
 
@@ -237,35 +268,103 @@ void RemoteIDManager::broadcast(RID_Msg_Type rmt) {
     if (!ready) return;
 
     sock.sendto(&msg_out, msg_out_len, BRCHANNEL, multicopter->get_broadcast_port());
+    LOG("bcst " + std::to_string(msg_out_len - sizeof(RSimMessage_Header)) \
+    + " lat " + std::to_string(current_real_location.lat/1.0e7) \
+    + " lon " + std::to_string(current_real_location.lng/1.0e7) \
+    + " alt " + std::to_string(current_real_location.alt/100.0) );
+
+    // for self testing only. comment out if not in self testing
+    // recvBroadcast(msg_out.payload, msg_out_len - sizeof(RSimMessage_Header));
 
     //logFile << messagePack->toJson().dump(4) << std::endl;
     
 }
 
-void RemoteIDManager::processMessagePack(const uint8_t* data) {
-    MessagePack p(data);
+void RemoteIDManager::processBasicID(const uint8_t* data, std::array<uint8_t, RIDLEN> id, bool verified) {
+    BasicIDMessage p(data);
 
-    int i;
+    ReceivedIDMsg m;
+    m.id = p.basicIDMessage;
+    m.verified = verified;
+    m.receivedTime = current_time;
 
-    // auth must be the first packet in message pack.
-    MessageHeader f(p.pack.messages[0]);
+    if (uavs.count(id) == 0) {
+        UAVStatus s;
+        s.ids.push_front(m);
+        uavs[id] = s;
+    } else {
+        UAVStatus& s = uavs[id];
+        if ( (m.receivedTime - s.ids.front().receivedTime) > MinMsgInterval ) {
+            s.ids.push_front(m);
+            purgeStatus(id);
+        }
+    }
 
-    if (f.header.MessageType == RID_Auth) {
+}
+
+void RemoteIDManager::processLocationVector(const uint8_t* data, std::array<uint8_t, RIDLEN> id, bool verified) {
+    LocationVectorMessage p(data);
+ 
+    ReceivedLocMsg m;
+    m.location = p.locationVector;
+    m.lat = p.locationVector.latitude/1.0e7;
+    m.lon = p.locationVector.longitude/1.0e7;
+    m.alt = p.locationVector.geodeticAltitude/2.0-1000.0;
+    m.verified = verified;
+    m.receivedTime = current_time;
+
+    if (uavs.count(id) == 0) {
+        UAVStatus s;
+        s.locs.push_front(m);
+        uavs[id] = s;
+    } else {
+        UAVStatus& s = uavs[id];
+        if ( (m.receivedTime - s.locs.front().receivedTime) > MinMsgInterval ) {
+            s.locs.push_front(m);
+            purgeStatus(id);
+        }
+    }
+
+}
+
+void RemoteIDManager::purgeStatus(std::array<uint8_t, RIDLEN> id) {
+    // nothing to purge
+    if (uavs.count(id) == 0) return;
+
+    UAVStatus& s = uavs[id];
+
+    // remove over-que messages
+    while( s.ids.size()>QUESIZE ) s.ids.pop_back();
+    // remove expire messeages
+    while( s.ids.size()>0 && (current_time - s.ids.back().receivedTime) > MsgExpire ) s.ids.pop_back(); 
+    // remove over-que messages
+    while( s.locs.size()>QUESIZE ) s.locs.pop_back(); 
+    // remove expire messeages
+    while( s.ids.size()>0 && (current_time - s.locs.back().receivedTime) > MsgExpire ) s.locs.pop_back();
+
+    // no message left for uav id, so remove id from uavs
+    if (s.ids.size() == 0 && s.locs.size() == 0) uavs.erase(id);
+}
+
+bool RemoteIDManager::verifySignature(const MessagePack& p) {
+
+        // must have two auth msgs and at leat one id msg
+        assert(p.pack.numberMessages >= 3);
         // process authentication
         // get the signature
         fp_t sig;
         uint8_t* sigptr = (uint8_t*)&sig;
         // page 0
         MessageHeader h_a0(p.pack.messages[0]);
-        AuthenticationMessage a0(p.pack.messages[0]+1);
+        AuthenticationMessage a0(&(p.pack.messages[0][1]));
         // validate page 0
-        assert(a0.authentication.authType == RID_Auth_Type_UasID || a0.authentication.authType == RID_Auth_Type_Message);
+        assert(a0.authentication.authType == RID_Auth_Type_UasID || a0.authentication.authType == RID_Auth_Type_Location);
         assert(a0.authentication.pageCount == 2);
         assert(a0.authentication.pageNumber == 0);
         assert(a0.authentication.length == 32);
         // page 1
         MessageHeader h_a1(p.pack.messages[1]);
-        AuthenticationMessagePage a1(p.pack.messages[1]+1);
+        AuthenticationMessagePage a1(&(p.pack.messages[1][1]));
         // validate page 1
         assert(a1.authenticationPage.authType == a0.authentication.authType);
         assert(a1.authenticationPage.pageNumber == 1);
@@ -277,31 +376,184 @@ void RemoteIDManager::processMessagePack(const uint8_t* data) {
         memcpy(sigptr+17, a1.authenticationPage.authenticationData, 15);
 
         // get id from message[2]
-        BasicIDMessage m(p.pack.messages[2]+1);
+        // message[2] must be basic id
+        assert(p.pack.messages[2][0] == RID_BasicID);
+        BasicIDMessage id(&(p.pack.messages[2][1]));
         uint8_t rid[RIDLEN];
-        memcpy(rid, m.basicIDMessage.uasId, RIDLEN);
+        memcpy(rid, id.basicIDMessage.uasId, RIDLEN);
 
         // from message[2], all data, but need to be concatenated
-
-        uint8_t* d = p.pack.messages[2];
+        const uint8_t* d = &(p.pack.messages[2][0]);
         uint8_t l = (p.pack.numberMessages - 2) * 25;
         
         // verify
-        //int v;
+        int v;
         // method 1
-        verify1(sig, rid, RIDLEN, d, l);
+        v = verify1(sig, rid, RIDLEN, d, l);
         // method 2
         //v = verify2(sig, rid, RIDLEN, d, l);
+        LOG("verify " + std::to_string(v));
 
+        return v==0 ? true : false;
+}
+
+void RemoteIDManager::processMessagePack(const uint8_t* data) {
+    MessagePack p(data);
+    int i;
+
+    // auth must be the first packet in message pack.
+    MessageHeader f(p.pack.messages[0]);
+
+    if (f.header.MessageType == RID_Auth) {
+
+        AuthenticationMessage a0(&(p.pack.messages[0][1]));
+
+        // get id from message[2]
+        // message[2] must be basic id
+        assert(p.pack.messages[2][0] == RID_BasicID);
+        BasicIDMessage idmsg(&(p.pack.messages[2][1]));
+        std::array<uint8_t, RIDLEN> id;
+        for (i=0; i<RIDLEN; i++) id[i] = idmsg.basicIDMessage.uasId[i];
+
+        bool v = false;
+        if (uavs.count(id) == 0) {
+            // a new nearby uav
+            LOG("reason new_nearby_uav");
+            v = verifySignature(p);
+            if ( !v ) return; // ToDo
+
+        } else {
+            // an exisiting nearby uav
+            const UAVStatus& s = uavs[id];
+            std::size_t loccnt = s.locs.size();
+            if (loccnt < MinLocRegression) {
+                // not enough past locations for regression
+                LOG("reason not_enough_past_locations_for_regression " + std::to_string(loccnt));
+                v = verifySignature(p);
+                if ( !v ) return;
+
+            } else {
+                // enough past locations
+                
+                if ( (current_time - s.lastLocVerifyTime) > MaxLocVerifyInterval ) {
+                    // too long not verify a location
+                    LOG("reason too_long_not_verify_a_location " + std::to_string(current_time - s.lastLocVerifyTime));
+                    v = verifySignature(p);
+                    if ( !v ) return;
+
+                } else {
+                    // check if the last verified location is in the past MinLocVerify.
+
+                    bool pv = false;
+                    for (i=0; i<=MinLocVerify; i++) {
+                        if (s.locs[i].verified) {
+                            pv = true;
+                            break;
+                        }
+                    }
+                    if (!pv) {
+                        // no early verification in the past MinLocVerify
+                        LOG("reason no_early_verification_in_the_past_MinLocVerify " + std::to_string(s.locs.size()));
+                        v = verifySignature(p);
+                        if ( !v ) return;
+
+                    } else {
+                        // one location was verified recently within a time limit and a count limit
+                        if (a0.authentication.authType == RID_Auth_Type_Location) {
+                            // so, we can regress on the past locations
+                            std::deque<double> lats;
+                            std::deque<double> lons;
+                            std::deque<double> alts;
+                            std::deque<double> dts;
+                            double dt;
+                            uint64_t starttime = s.locs[0].receivedTime;
+                            for (i=0; ((std::size_t)i)<loccnt; i++) {
+                                const ReceivedLocMsg& l = s.locs[i];
+                                dt = ((double)l.receivedTime) - ((double)starttime);
+                                if ( -dt  > RegWindow ) break;
+                                lats.push_front(l.lat);
+                                lons.push_front(l.lon);
+                                alts.push_front(l.alt);
+                                dts.push_front(dt/1.0e6);
+                            }
+
+                            if (lats.size() < MinLocRegression) {
+                                LOG("reason not_enough_past_locations_within_regression_window " + std::to_string(lats.size()));
+                                v = verifySignature(p);
+                                if ( !v ) return;
+
+                            } else {
+                                // enough regression locations
+
+                                double rlat[N], rlon[N], ralt[N];
+                                if (!qregress(dts, lats, rlat)) LOG("cannot predict lat");
+                                if (!qregress(dts, lons, rlon)) LOG("cannot predict lon");
+                                if (!qregress(dts, alts, ralt)) LOG("cannotpredict alt");
+
+                                // y = r[0]*x2 + r[1]*x + r[2];
+                                double plat, plon, palt, dt2;
+                                dt = (current_time - starttime)/1.0e6;
+                                dt2 = dt*dt;
+                                plat = rlat[0]*dt2 + rlat[1]*dt + rlat[2];
+                                plon = rlon[0]*dt2 + rlon[1]*dt + rlon[2];
+                                palt = ralt[0]*dt2 + ralt[1]*dt + ralt[2];
+
+                                // broadcast location
+                                double blat, blon, balt; 
+                                LocationVectorMessage lm(&(p.pack.messages[3][1]));
+                                blat = lm.locationVector.latitude/1.0e7;
+                                blon = lm.locationVector.longitude/1.0e7;
+                                balt = (lm.locationVector.geodeticAltitude/2.0-1000.0);
+                                
+                                // error
+                                double elat, elon, ealt;
+                                elat = abs(plat - blat);
+                                elon = abs(plon - blon);
+                                ealt = abs(palt - balt);
+
+                                LOG("predict");
+                                printf("broad : lat %.8f lon %.8f alt %.3f\n", blat, blon, balt);
+                                printf("predi : lat %.8f lon %.8f alt %.3f\n", plat, plon, palt);
+                                printf("error : lat %.8f lon %.8f alt %.3f\n", elat, elon, ealt);
+
+                                if (elat>2e-5 || elon>2e-5 || ealt>2.0) {
+                                    // error is too large
+                                    LOG("reason error_too_large");
+                                    v = verifySignature(p);
+                                    if ( !v ) return;
+
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (a0.authentication.authType == RID_Auth_Type_UasID) {
+            // message[2] must be id
+            assert(p.pack.messages[2][0] == RID_BasicID);
+            processBasicID(&(p.pack.messages[2][1]), id, v);
+            if (v && uavs.count(id)>0) uavs[id].lastIdVerifyTime = current_time;
+        } else if (a0.authentication.authType == RID_Auth_Type_Location) {
+            // message[2] must be id
+            assert(p.pack.messages[2][0] == RID_BasicID);
+            // message[3] must be location
+            assert(p.pack.messages[3][0] == RID_Location);
+            processLocationVector(&(p.pack.messages[3][1]), id, v);
+            if (v && uavs.count(id)>0) uavs[id].lastLocVerifyTime = current_time;
+        }
+        
     } else {
         // not auth messages
         for (i=0; i<p.pack.numberMessages; i++) {
-            MessageHeader h(p.pack.messages[i]);
+            MessageHeader h(p.pack.messages[i][0]);
             if (h.header.MessageType == RID_BasicID) {
-                BasicIDMessage m(p.pack.messages[i]+1);
+                BasicIDMessage m(&(p.pack.messages[i][1]));
                 // processBasicID(m);  // TODO
             } else if (h.header.MessageType == RID_Location) {
-                LocationVectorMessage m(p.pack.messages[i]+1);
+                LocationVectorMessage m(&(p.pack.messages[i][1]));
                 // processLocationVector(m); // TODO
             }
         }
@@ -309,7 +561,6 @@ void RemoteIDManager::processMessagePack(const uint8_t* data) {
 
     return;
 }
-
 
 int RemoteIDManager::makeBasicID(RSimMessage& msg) {
     uint8_t idType = RID_ID_Type_Serial;
@@ -375,41 +626,55 @@ int RemoteIDManager::makeLocationVector(RSimMessage& msg) {
 }
 
 int RemoteIDManager::makeAuthBasicID(RSimMessage& msg) {
-    uint8_t data[1][25];
+    uint8_t idMsg[25];
     RSimMessage _m;
     makeBasicID(_m);
-    memcpy(data[0], _m.payload, 25);
-    return makeAuth(msg, RID_Auth_Type_UasID, data, 1);
+    memcpy(idMsg, _m.payload, 25);
+
+    MessageHeader authPackHeader(RID_MsgPack);
+    AuthIDMessage authPack;
+
+    addSignature(authPack, RID_Auth_Type_UasID, idMsg, 25);
+
+    // add id
+    authPack.addMessage(idMsg);
+
+    return setRSimMsg(msg, authPackHeader, authPack);
 }
 
 int RemoteIDManager::makeAuthLocationVector(RSimMessage& msg) {
-    uint8_t data[2][25];
+    uint8_t idMsg[25], locMsg[25], data[50];
     RSimMessage _m;
     makeBasicID(_m);
-    memcpy(data[0], _m.payload, 25);
+    memcpy(idMsg, _m.payload, 25);
     makeLocationVector(_m);
-    memcpy(data[1], _m.payload, 25);
-    return makeAuth(msg, RID_Auth_Type_Message, data, 2);
-} 
+    memcpy(locMsg, _m.payload, 25);
 
-/**
- * Auth packet is carried in MessagePack.
- * The first two messages are auth page 0 and page 1, including the signature.
- * The rest of messages are the data.
- */
-int RemoteIDManager::makeAuth(RSimMessage& msg, RID_Auth_Type type, uint8_t data[][25], uint8_t count) {
+    memcpy(data, idMsg, 25);
+    memcpy(data+25, locMsg, 25);
+ 
     MessageHeader authPackHeader(RID_MsgPack);
-    MessagePack authPack;
+    AuthLocMessage authPack;
 
+    addSignature(authPack, RID_Auth_Type_Location, data, 50);
+
+    // add data
+    authPack.addMessage(idMsg);
+    authPack.addMessage(locMsg);
+
+    return setRSimMsg(msg, authPackHeader, authPack);
+    
+}
+
+void RemoteIDManager::addSignature(MessagePack& authPack, RID_Auth_Type authType, uint8_t* data, int len) {
     // sign
     fp_t sig;
     // method 1
-    sign1(sig, (uint8_t*)&(data[0]), 25*count);
+    sign1(sig, data, len);
     // method 2
-    //sign2(sig, m.payload, 25);
+    //sign2(sig, data, len);
 
     // auth page 0
-    uint8_t authType = type;
     uint8_t pageNumber = 0;
     uint8_t pageCount = 2;
     uint8_t length = 32;
@@ -439,11 +704,6 @@ int RemoteIDManager::makeAuth(RSimMessage& msg, RID_Auth_Type type, uint8_t data
     );
     setRSimMsg(_m, authenticationMessageHeader, authenticationMessagePage);
     authPack.addMessage(_m.payload);
-
-    // add data
-    for (int i=0; i<count; i++) authPack.addMessage(data[i]);
-
-    return setRSimMsg(msg, authPackHeader, authPack);
 }
 
 // Direction expressed as the route course measured clockwise from true north. Encode as 0–179.

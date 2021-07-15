@@ -154,11 +154,8 @@ public:
 
     // for remoteid
     void set_remoteid(uint8_t* _id) { memcpy(remoteid, _id, RIDLEN); }
-
     uint8_t* get_remoteid() { return remoteid; }
-
     void set_broadcast_port(uint16_t broadcast_port) { portbr = broadcast_port; }
-
     uint16_t get_broadcast_port() { return portbr; }
 
 protected:

@@ -3,7 +3,7 @@
 
 // Remote ID message type
 enum RID_Msg_Type {
-    RID_BasicID = 0,       // static, mandatory
+    RID_BasicID = 0,     // static, mandatory
     RID_Location = 1,    // dynamic, mandatory
     RID_Auth = 2,        // static, optional
     RID_SelfID = 3,      // static, optional
@@ -103,7 +103,7 @@ enum RID_Auth_Type {
     RID_Auth_Type_OpID = 2,     // Operator ID Signature
     RID_Auth_Type_Message = 3,  // Message Set Signature
     RID_Auth_Type_NetID = 4,    // Authentication Provided by Network Remote ID
-                                // 5-9: Reserved for Spec
+    RID_Auth_Type_Location = 5, // 5-9: Reserved for Spec
                                 // A-F: Available for Private Use
 };
 
